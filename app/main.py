@@ -1,7 +1,7 @@
 from fastapi import FastAPI, HTTPException, Query
 from typing import List, Dict
 from datetime import datetime
-from app.models import LogEntryResponse, LogStatsResponse, LogFilterParams
+from app.models import LogEntryResponse, LogStatsResponse, LogFilterParams, Pagination, PaginatedLogResponse
 from app.log_reader import get_all_logs
 from collections import Counter
 
@@ -11,13 +11,10 @@ LOG_DIRECTORY = "./logs"
 
 logs = get_all_logs(LOG_DIRECTORY)
 
-# for i in logs:
-#     print(i)
-# log_dict: Dict[str, LogEntryResponse] = {log.id: log for log in logs}
 
 log_dict: Dict[str, dict] = {log.id: log.to_dict() for log in logs}
 
-@app.get("/logs", response_model=List[LogEntryResponse])
+@app.get("/logs", response_model=PaginatedLogResponse)
 def get_logs(params: LogFilterParams = Query(...)):
     def matches_filters(log) -> bool:
         if params.level and log.level != params.level:
@@ -33,7 +30,22 @@ def get_logs(params: LogFilterParams = Query(...)):
             if log_time > params.end_time:
                 return False
         return True
-    return [log_dict[log.id] for log in logs if matches_filters(log)]
+    filtered_logs = [log_dict[log.id] for log in logs if matches_filters(log)]
+    
+    total = len(filtered_logs)
+    skip = min(params.skip, total)
+    limit = min(params.limit, total - skip)
+    paginated_logs = filtered_logs[skip:skip + limit]
+    
+    return PaginatedLogResponse(
+        data=paginated_logs,
+        pagination=Pagination(
+            total=total,
+            skip=skip,
+            limit=limit,
+            has_more=(skip + limit) < total
+        )
+    )
 
 @app.get("/logs/stats", response_model=LogStatsResponse)
 def get_log_stats():
